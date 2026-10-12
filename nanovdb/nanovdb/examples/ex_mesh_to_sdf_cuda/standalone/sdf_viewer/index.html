@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh → SDF · Sparse GPU viewer</title>
+<style>
+:root{color-scheme:dark;font:13px system-ui,sans-serif;background:#11151c;color:#e8edf4}*{box-sizing:border-box}body{margin:0;display:grid;grid-template-columns:290px 1fr;height:100vh;overflow:hidden}aside{padding:24px 20px;overflow:auto;background:#181e28;border-right:1px solid #303a49}h1{font-size:20px;margin:0 0 4px;letter-spacing:-.5px}h2{font-size:11px;letter-spacing:1.4px;color:#97a8bd;text-transform:uppercase;margin:25px 0 12px}p{line-height:1.55;color:#a8b6c9}label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:11px 0}select,input[type=number],button{font:inherit;color:inherit;background:#252e3d;border:1px solid #3a485d;border-radius:6px;padding:7px;min-width:0}select{max-width:166px}input[type=number]{width:88px}input[type=range]{width:126px;accent-color:#6ba9ff}input[type=color]{width:40px;height:28px;border:0;background:none;padding:0}button{cursor:pointer}button:hover{background:#35465f}button.primary{background:#397dde;color:white;border-color:#397dde;width:100%;font-weight:600;padding:11px}button:disabled{opacity:.5;cursor:wait}.row{display:flex;gap:7px;margin:8px 0}.row>*{flex:1}.small{font-size:11px;color:#98a7bc}main{display:flex;flex-direction:column;min-width:0}header{display:flex;justify-content:space-between;gap:20px;padding:17px 24px;border-bottom:1px solid #303a49;align-items:center}#filename{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.badge{color:#8fc7ff;font-size:11px;white-space:nowrap}#stage{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;position:relative;padding:24px;background:radial-gradient(ellipse at center,#242f3f,#11151c)}canvas{max-width:100%;max-height:100%;touch-action:none;background:repeating-conic-gradient(#d5d8dd 0 25%,#eef0f3 0 50%) 50% / 18px 18px;box-shadow:0 12px 55px #0006;cursor:grab}canvas:active{cursor:grabbing}footer{padding:13px 24px;border-top:1px solid #303a49;display:flex;justify-content:space-between;gap:20px;font-size:11px;color:#a8b6c9}#error{color:#ffb0a7;white-space:pre-wrap;line-height:1.5;margin-top:12px}#legend{position:absolute;bottom:36px;background:#111c;padding:8px 14px;border-radius:6px;display:none;font-size:12px}#legend span{margin:0 8px}.warm{color:#ff7643}.cool{color:#64acff}output{font-variant-numeric:tabular-nums;font-size:11px;color:#aac9f6;min-width:32px;text-align:right}a{color:#aac9f6}@media(max-width:750px){body{grid-template-columns:245px 1fr}aside{padding:18px 12px}header,footer{padding:10px}#stage{padding:10px}.hint{display:none}}
+</style>
+<aside>
+<h1>Mesh → SDF</h1><div class="small">Sparse grid · CUDA rendering</div>
+<h2>Display</h2>
+<label>View<select id="mode"><option value="0">SDF surface</option><option value="1">Transmittance volume</option><option value="2">Surface normals</option><option value="3">Sign slice · full field</option><option value="4">Signed active voxels</option><option value="5">Sign slice · active band</option></select></label>
+<label>Projection<select id="orthographic"><option value="0">Perspective</option><option value="1">Orthographic</option></select></label>
+<label>Surface color<input id="color" type="color" value="#4281d7"></label>
+<label>Background<input id="background" type="color" value="#ffffff"></label>
+<label>Transparent PNG<input id="transparent" type="checkbox"></label>
+<label>Iso (voxels)<input id="iso" type="number" min="-100" max="100" step="0.05" value="0"></label>
+<label>Occlusion<input id="ao" type="range" min="0" max="2" step="0.05" value="0.6"><output id="aoValue"></output></label>
+<label>Exposure<input id="exposure" type="range" min="-3" max="3" step="0.1" value="0"><output id="exposureValue"></output></label>
+<div id="volumeControls" hidden>
+<label>Density<input id="density" type="range" min="0.05" max="10" step="0.05" value="2"><output id="densityValue"></output></label>
+<label>Shell (voxels)<input id="shell" type="number" min="0.05" max="20" step="0.05" value="1"></label>
+<p class="small">Absorption around the isosurface. Shell + |iso| must be smaller than the narrow-band half-width.</p>
+</div>
+<h2>Inspect</h2>
+<label>Clip / slice axis<select id="clipAxis"><option value="-1">Off</option><option value="0">X</option><option value="1">Y</option><option value="2">Z</option></select></label>
+<label>Plane<input id="plane" type="range" min="0" max="1" step="0.0001" value="0.5"><output id="planeValue"></output></label>
+<div class="row"><button id="fit">Fit</button><button data-axis="0">X</button><button data-axis="1">Y</button><button data-axis="2">Z</button></div>
+<p class="small">Signed active voxels draws unit cubes: orange −, blue +. Clip to reveal the inner band. Active-band slice hides inactive voxels; full-field slice includes deep interior.</p>
+<h2>Quality</h2>
+<label>Preview<select id="preview"><option value="640">640 px</option><option value="960" selected>960 px</option><option value="1440">1440 px</option><option value="1920">1920 px</option></select></label>
+<label>Ray step (voxels)<select id="step"><option value="1">1.0 · fast</option><option value="0.5" selected>0.5 · balanced</option><option value="0.25">0.25 · fine</option><option value="0.125">0.125 · finest</option></select></label>
+<label>Settled samples<select id="settled"><option value="1">1</option><option value="4" selected>4</option><option value="16">16</option></select></label>
+<h2>Figure export</h2>
+<label>Width<input id="width" type="number" min="64" max="16384" step="1" value="3840"></label>
+<label>Height<input id="height" type="number" min="64" max="16384" step="1" value="2160"></label>
+<label>Samples / pixel<select id="samples"><option value="4">4</option><option value="16" selected>16</option><option value="64">64</option><option value="128">128</option></select></label>
+<button class="primary" id="export">Export PNG · 300 dpi</button>
+<div class="row"><button id="save">Save camera</button><button id="load">Load camera</button></div>
+<input id="file" type="file" accept="application/json,.json" hidden>
+<p class="small">PNG embeds camera, render settings and source-grid metadata. Export preserves the camera and frame shown here.</p>
+<div id="error" role="alert"></div>
+</aside>
+<main>
+<header><span id="filename">Loading grid…</span><span class="badge">GPU RESIDENT</span></header>
+<div id="stage"><canvas id="canvas" width="960" height="540"></canvas><div id="legend"><span class="warm">● Interior (−)</span><span class="cool">● Exterior (+)</span> · stored voxel sign</div></div>
+<footer><span id="status" role="status">Connecting…</span><span class="hint">Drag: orbit · Shift / right drag: pan · Scroll: zoom · F: fit</span></footer>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), canvas=$('canvas'), ctx=canvas.getContext('2d');
+let settings, initial, grid, revision=0, busy=false, pending=null, timer, exporting=false;
+const add=(a,b)=>a.map((v,i)=>v+b[i]), sub=(a,b)=>a.map((v,i)=>v-b[i]), mul=(a,s)=>a.map(v=>v*s);
+const length=a=>Math.hypot(...a), norm=a=>mul(a,1/length(a));
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const clone=x=>JSON.parse(JSON.stringify(x));
+const scalarIds=['mode','orthographic','iso','ao','exposure','density','shell','clipAxis','step'];
+function toLinear(x){return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;}
+function toSrgb(x){return x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055;}
+function hex(a){return '#'+a.map(v=>Math.round(Math.max(0,Math.min(1,toSrgb(v)))*255).toString(16).padStart(2,'0')).join('');}
+function color(h){return [1,3,5].map(i=>toLinear(parseInt(h.slice(i,i+2),16)/255));}
+function planeBounds(){const a=Math.max(0,settings.clipAxis);return [grid.indexMin[a]-1,grid.indexMax[a]+1];}
+function labels(){
+  for(const id of ['ao','exposure','density'])$(id+'Value').textContent=(+settings[id]).toFixed(2);
+  $('planeValue').textContent=settings.clipPosition.toFixed(1);
+  $('volumeControls').hidden=settings.mode!==1;
+  $('legend').style.display=settings.mode>=3?'block':'none';
+}
+function sync(){
+  for(const id of scalarIds)$(id).value=settings[id];
+  for(const id of ['color','background'])$(id).value=hex(settings[id]);
+  $('transparent').checked=!!settings.transparent;
+  const [a,b]=planeBounds();$('plane').value=(settings.clipPosition-a)/(b-a);labels();
+}
+function frame(){
+  const w=+$('width').value,h=+$('height').value;
+  if(!Number.isInteger(w)||!Number.isInteger(h)||w<64||h<64||w>16384||h>16384||w*h>1e8)throw Error('Choose integer dimensions from 64 to 16384, at most 100 MP.');
+  return [w,h];
+}
+function size(longEdge){const [w,h]=frame(),r=w/h;return r>=1?[longEdge,Math.max(1,Math.round(longEdge/r))]:[Math.max(1,Math.round(longEdge*r)),longEdge];}
+function resize(){
+  const stage=$('stage'),r=canvas.width/canvas.height;
+  const w=Math.min(stage.clientWidth-48,(stage.clientHeight-48)*r);
+  canvas.style.width=Math.max(1,w)+'px';canvas.style.height=Math.max(1,w/r)+'px';
+}
+async function pump(){
+  if(busy||exporting||!pending)return;
+  const job=pending;pending=null;busy=true;
+  try{
+    const [width,height]=size(job.edge);
+    const response=await fetch('/render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:job.settings,width,height,samples:job.samples})});
+    if(!response.ok)throw Error(await response.text());
+    const bitmap=await createImageBitmap(await response.blob());
+    if(job.revision===revision){
+      canvas.width=width;canvas.height=height;ctx.clearRect(0,0,width,height);ctx.drawImage(bitmap,0,0);resize();
+      $('status').textContent=`${width} × ${height} · ${job.samples} spp · ${response.headers.get('X-Render-Ms')} ms`;
+      $('error').textContent='';
+    }
+    bitmap.close();
+  }catch(e){$('error').textContent=e.message;}
+  finally{busy=false;if(pending)pump();}
+}
+function queue(edge,samples){pending={settings:clone(settings),revision,edge,samples};pump();}
+function changed(interacting=false){
+  if(!settings)return;
+  ++revision;clearTimeout(timer);labels();
+  queue(interacting?Math.min(480,+$('preview').value):+$('preview').value,1);
+  timer=setTimeout(()=>queue(+$('preview').value,+$('settled').value),interacting?250:120);
+}
+for(const id of scalarIds)$(id).addEventListener('input',()=>{
+  settings[id]=+$(id).value;
+  if(id==='clipAxis'){
+    if((settings.mode===3||settings.mode===5)&&settings.clipAxis<0)settings.mode=0;
+    const [a,b]=planeBounds();settings.clipPosition=(a+b)/2;
+  }
+  if(id==='mode'&&settings.mode>=3)$('settled').value='1';
+  if(id==='mode'&&(settings.mode===3||settings.mode===5)){
+    if(settings.clipAxis<0)settings.clipAxis=2;
+    const [a,b]=planeBounds();settings.clipPosition=(a+b)/2;
+    axisView(settings.clipAxis);settings.orthographic=1;
+  }
+  sync();changed();
+});
+for(const id of ['color','background'])$(id).addEventListener('input',()=>{settings[id]=color($(id).value);changed();});
+$('transparent').onchange=()=>{settings.transparent=+$('transparent').checked;changed();};
+$('plane').oninput=()=>{const[a,b]=planeBounds();settings.clipPosition=a+(b-a)*+$('plane').value;changed(true);};
+for(const id of ['preview','settled','width','height'])$(id).onchange=()=>changed();
+function axisView(axis){
+  const distance=length(sub(settings.eye,settings.target)), offset=[0,0,0];offset[axis]=distance;
+  settings.eye=add(settings.target,offset);settings.up=axis===1?[0,0,-1]:[0,1,0];
+}
+for(const button of document.querySelectorAll('[data-axis]'))button.onclick=()=>{axisView(+button.dataset.axis);changed();};
+function fit(){settings.eye=clone(initial.eye);settings.target=clone(initial.target);settings.up=clone(initial.up);settings.orthoScale=initial.orthoScale;changed();}
+$('fit').onclick=fit;
+window.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='f'&&!['INPUT','SELECT'].includes(e.target.tagName))fit();});
+let drag=null;
+canvas.oncontextmenu=e=>e.preventDefault();
+canvas.onpointerdown=e=>{if(!settings)return;drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2};canvas.setPointerCapture(e.pointerId);};
+canvas.onpointerup=canvas.onpointercancel=()=>{drag=null;changed();};
+canvas.onpointermove=e=>{
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;
+  const offset=sub(settings.eye,settings.target),distance=length(offset);
+  if(drag.pan||e.shiftKey){
+    const forward=norm(mul(offset,-1)),right=norm(cross(forward,settings.up)),up=cross(right,forward);
+    const scale=(settings.orthographic?settings.orthoScale:2*distance*Math.tan(settings.fov*Math.PI/360))/canvas.clientHeight;
+    const shift=add(mul(right,-dx*scale),mul(up,dy*scale));settings.eye=add(settings.eye,shift);settings.target=add(settings.target,shift);
+  }else{
+    let azimuth=Math.atan2(offset[0],offset[2])-dx*.008;
+    let elevation=Math.asin(Math.max(-1,Math.min(1,offset[1]/distance)))+dy*.008;
+    elevation=Math.max(-1.55,Math.min(1.55,elevation));
+    settings.eye=add(settings.target,[distance*Math.cos(elevation)*Math.sin(azimuth),distance*Math.sin(elevation),distance*Math.cos(elevation)*Math.cos(azimuth)]);
+    settings.up=[0,1,0];
+  }
+  changed(true);
+};
+canvas.addEventListener('wheel',e=>{
+  if(!settings)return;e.preventDefault();const factor=Math.exp(Math.max(-200,Math.min(200,e.deltaY))*.0015);
+  settings.eye=add(settings.target,mul(sub(settings.eye,settings.target),factor));settings.orthoScale*=factor;changed(true);
+},{passive:false});
+function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
+function documentSettings(){const[width,height]=frame();return {format:'mesh-sdf-viewer-v1',settings:clone(settings),width,height,samples:+$('samples').value,grid};}
+$('save').onclick=()=>{try{download(new Blob([JSON.stringify(documentSettings(),null,2)],{type:'application/json'}),'sdf-camera.json');}catch(e){$('error').textContent=e.message;}};
+$('load').onclick=()=>$('file').click();
+$('file').onchange=async e=>{
+  try{const file=e.target.files[0];if(!file)return;const doc=JSON.parse(await file.text());settings={...settings,...(doc.settings||doc)};
+    if(doc.width)$('width').value=doc.width;if(doc.height)$('height').value=doc.height;if(doc.samples)$('samples').value=doc.samples;
+    sync();changed();
+  }catch(err){$('error').textContent=err.message;}
+};
+$('export').onclick=async()=>{
+  if(exporting)return;
+  const button=$('export');button.disabled=true;exporting=true;clearTimeout(timer);pending=null;
+  $('error').textContent='';button.textContent='Rendering full resolution…';
+  try{
+    const doc=documentSettings();
+    const response=await fetch('/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(doc)});
+    if(!response.ok)throw Error(await response.text());
+    download(await response.blob(),'sdf-figure.png');
+    $('status').textContent=`Exported ${doc.width} × ${doc.height} · ${doc.samples} spp · ${response.headers.get('X-Render-Ms')} ms`;
+  }catch(e){$('error').textContent=e.message;}
+  finally{exporting=false;button.disabled=false;button.textContent='Export PNG · 300 dpi';if(pending)pump();}
+};
+window.addEventListener('resize',resize);
+fetch('/info').then(r=>{if(!r.ok)throw Error('Could not load grid metadata');return r.json();}).then(data=>{
+  grid=data.grid;settings=data.settings;initial=clone(settings);sync();
+  const filename=grid.file.split('/').pop();
+  $('filename').textContent=`${filename} · ${grid.activeVoxels.toLocaleString()} active voxels · ${(grid.gridBytes/2**30).toFixed(2)} GiB`;
+  $('filename').title=grid.file;changed();
+}).catch(e=>{$('error').textContent=e.message;});
+</script>
+</html>
