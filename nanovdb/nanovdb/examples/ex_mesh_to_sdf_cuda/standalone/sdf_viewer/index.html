@@ -170,7 +170,10 @@ canvas.onpointermove=e=>{
 };
 canvas.addEventListener('wheel',e=>{
   if(!settings)return;e.preventDefault();const factor=Math.exp(Math.max(-200,Math.min(200,e.deltaY))*.0015);
-  settings.eye=add(settings.target,mul(sub(settings.eye,settings.target),factor));settings.orthoScale*=factor;changed(true);
+  // Orthographic zoom changes the image scale; dollying its ray plane can cut into the object.
+  if(settings.orthographic)settings.orthoScale*=factor;
+  else settings.eye=add(settings.target,mul(sub(settings.eye,settings.target),factor));
+  changed(true);
 },{passive:false});
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
 function documentSettings(){const[width,height]=frame();return {format:'mesh-sdf-viewer-v1',settings:clone(settings),width,height,samples:+$('samples').value,grid};}

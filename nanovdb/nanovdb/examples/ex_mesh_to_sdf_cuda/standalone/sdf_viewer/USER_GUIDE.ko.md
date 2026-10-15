@@ -429,3 +429,12 @@ active 240,224개를 표시했고, `output/polyscope/bunny-all-levels-4k.png`도
 `--whole-grid`로 전체를 등록할 수 있다. 고정된 cell 개수 상한을 두지는 않지만,
 이 high-res bunny 전체의 binary cell 기록만 약 53 GiB라서 전체 등록은 실행하지
 않았다. ROI를 쓰면 계층별 크기를 유지하며 메모리 비용을 줄일 수 있다.
+
+### 확대할 때 단면처럼 잘려 보이는 경우
+
+저장된 root 관찰 preset은 Z=2047.5 단면을 켠 상태다. 전체를 보려면
+`Clip / slice axis`를 `Off`로 설정한다. 이것은 카메라 near plane과 별개다.
+Orthographic wheel zoom은 `orthoScale`만 바꾸며 eye 위치를 이동시키지 않는다.
+이전 UI는 eye도 함께 이동시켜, 확대하면 ray 시작면이 물체 안으로 들어가는
+문제가 있었다. 수정 후에는 페이지를 새로고침하면 적용된다. `F`는 시작 카메라로
+복귀한다. Perspective zoom은 eye를 움직이므로 과도하게 접근하면 내부에 들어갈 수 있다.
