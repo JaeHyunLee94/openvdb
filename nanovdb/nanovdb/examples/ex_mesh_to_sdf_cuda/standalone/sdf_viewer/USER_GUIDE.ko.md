@@ -332,3 +332,44 @@ clipping하면 경계와 root의 관계를 확인할 수 있다.
 
 정렬 방법, 정확한 build 옵션, 측정표와 4K export는
 [REAL_MESH_ROOT_VALIDATION.md](REAL_MESH_ROOT_VALIDATION.md)를 참고한다.
+
+## 9. 일반 mesh로 root tile 검증하기
+
+`validate_mesh_root.py`는 일반 닫힌 OBJ의 내부 cube 후보를 찾고, 복사본을
+평행이동해 root 격자에 맞춘 뒤 기존 MeshToSDF를 실행한다. 원본 형상과 library는
+수정하지 않는다. 실제 출력 root 전체를 독립 triangle–cube 교차 검사와
+solid-angle winding으로 검사하고, GPU 부호 조회도 별도로 비교한다.
+
+```bash
+cmake -S . -B build -DBUILD_ROOT_FILL_VALIDATION=ON \
+  -DBUILD_MESH_CONVERTER=ON -DBUILD_MANAGED_MESH_CONVERTER=ON
+cmake --build build --target sdf_analyze_mesh_root sdf_from_mesh_managed sdf_renderer -j2
+python3 validate_mesh_root.py /path/to/bunny.obj --resolution 4096 --band 3 --managed \
+  --output-dir output/general-mesh-root/band3
+```
+
+`--managed`는 별도 실행 파일에서 할당만 CUDA Unified Memory로 바꿔 시스템
+RAM도 활용한다. library 파일은 그대로이며, GPU 메모리에 상주하는 일반 실행보다
+느릴 수 있다. viewer 자체는 여전히 GPU에 grid 전체를 올리므로 변환 성공과
+viewer 메모리 적합성은 별개다.
+
+실제 bunny band=2 고해상도 테스트에서는 root 15개 중 내부 `(0,0,0)` 1개는
+올바르지만 **14개는 기하상 외부**여서 검증에 실패했다. 잘못된 tile도 지우거나
+보정하지 않고 원본 출력 그대로 보존한다. 통과하는 그림으로 오해하면 안 된다.
+재현 명령, 검사 범위와 후속 비교 결과는
+[GENERAL_MESH_ROOT_VALIDATION.md](GENERAL_MESH_ROOT_VALIDATION.md)를 참고한다.
+
+같은 voxel size에서 **band=3은 통과**했다. active voxel 1,905,116,810개,
+root `(0,0,0)` 1개이며 root 전체가 실제 bunny 안에 들어가는 것을 확인했다.
+표면에서 떨어진 내부·외부 부호 1,749점도 모두 일치했다. 기존 library 코드는
+수정하지 않았다. 최종 grid는 약 9.51 GiB이며, 변환 중 managed allocation은
+약 51.60 GiB까지 올라갔으므로 시스템 RAM이 충분해야 한다.
+
+```bash
+python3 viewer.py output/general-mesh-root/band3/bunny-r4096.nvdb \
+  --settings output/general-mesh-root/band3/bunny-root-context-camera.json --port 8768 --open
+```
+
+이 로컬 preset은 active band와 Root를 함께 보여주고 중앙을 clipping한다.
+Leaf/Lower/Upper도 켜면 전체 fill을 볼 수 있다. 모든 음수 cell은 같은 주황색이고,
+크기는 실제 계층에 따라 다르다. preset과 4K PNG는 출력 파일로 Git에 올리지 않는다.

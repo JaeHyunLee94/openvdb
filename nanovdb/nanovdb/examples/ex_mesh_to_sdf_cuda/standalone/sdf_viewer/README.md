@@ -304,3 +304,15 @@ For **real OBJ → MeshToSDF → root fill** testing, see
 of a closed cube at voxel size 0.000487329435 produced 303,170,734 active voxels
 and exactly one actual 4096³ root tile. Independent geometric checks and 2,197
 GPU sign probes passed. The guide includes reproduction and memory measurements.
+
+For ordinary triangle meshes such as **bunny**, see
+[general-mesh root validation](GENERAL_MESH_ROOT_VALIDATION.md). It adds an
+independent triangle/BVH and solid-angle oracle, GPU sign probes and an optional
+Unified Memory driver for inputs exceeding VRAM. The guide records both passing
+controls and an actual high-resolution exterior-root counterexample.
+
+The actual high-resolution **bunny with band=3 passed**: 1,905,116,810 active
+voxels, one fully contained root `(0,0,0)`, and 1,749 independent sign comparisons.
+Its band=2 counterpart returned 14 exterior roots in addition to the correct
+interior root and is explicitly recorded as a failure. Both use unchanged library
+sources; the optional managed driver allowed the conversion to exceed VRAM.
