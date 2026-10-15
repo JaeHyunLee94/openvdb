@@ -11,6 +11,7 @@ input grids, topology, stored signs, or distance values.
 | `CMakeLists.txt` | Shared CUDA renderer; optional existing mesh converter and CPU test-fixture generator |
 | `renderer.h` | Plain C-compatible settings/metadata structs and exported entry points |
 | `renderer.cu` | Host loading/validation, device ownership, channel binding, kernel launch and error reporting |
+| `fill_geometry.h` | Host-side childless-fill counts and bounds, with no dense expansion |
 | `field.cuh` | Float SDF lookup or ValueOnIndex sidecar lookup with inactive-interior sign recovery |
 | `render.cuh` | Camera rays, HDDA traversal, voxel cubes, surfaces, volume integration, slices and color encoding |
 | `viewer.py` | ctypes binding, input checks, local HTTP server, tiled PNG writer, CLI/headless rendering |
@@ -73,7 +74,7 @@ background, nonempty active bounds and uniform unsheared voxel transforms.
 It is intended for locally generated files; it is not a complete hostile-file
 validator for every NanoVDB structural invariant.
 
-## Six rendering modes
+## Seven rendering modes
 
 `RenderSettings.mode` is stable across C++/Python/JSON:
 
@@ -85,6 +86,7 @@ validator for every NanoVDB structural invariant.
 | 3 | Sign slice · full field | Nearest voxel on plane, including inactive interior/exterior |
 | 4 | Signed active voxels | Exact active unit-cube topology, sign-colored faces |
 | 5 | Sign slice · active band | Nearest active voxel on plane; inactive samples are transparent |
+| 6 | Full-space signed cells | Active unit cubes plus negative inactive 1³/8³/128³/4096³ boxes |
 
 ### Active voxel cubes (mode 4)
 
@@ -102,6 +104,38 @@ inner band from an outside camera. Clipping removes the near part of the grid an
 reveals both sides of the band. This is still the entire active topology, even
 though only its first visible face per ray contributes to an opaque image.
 There is no large instance buffer or polygon mesh proportional to voxel count.
+
+### Hierarchical interior fill (mode 6)
+
+Mode 6 reuses the shifted-ray cube traversal but retains the HDDA cell dimension.
+A leaf sample has size 1; a childless lower entry has size 8; a childless upper
+entry has size 128; an absent root region has size 4096. Active cells use bit 4
+of `fillMask`. Inactive cells are visible only when the signed accessor reports
+negative and their size's bit (0..3) is enabled. Positive inactive cells are skipped.
+All negative cells use exactly the same base RGB as negative active voxels.
+Face coordinates and edge outlines scale with the native cube dimension.
+
+HDDA dimension lookup uses the actual ray entry coordinate clamped to the current
+cell, not just the coarse cell origin: a child under another corner of the coarse
+cell must not be skipped. Clip intersections can cut through a coarse tile and
+shade the exposed face. No fine-grid voxelization, instance array or new GPU
+allocation proportional to interior voxel volume is involved.
+
+`fill_geometry.h` counts and bounds the negative inactive boxes at load time.
+Leaf candidates are `leaf_invert & ~valueMask`; internal candidates are
+`invert & ~childMask`. Float level sets derive the same information from negative
+childless values. Root lists and dense masks use the same signed decoding as
+field lookup, with child nodes taking precedence. The active bounding box is
+expanded to cover stored fill; this matters for synthetic and externally generated
+grids whose fill extends beyond active values. Root origins and coordinate-range
+limits are checked. `GridInfo.fillBoxes` counts boxes, not represented unit voxels;
+`fillIndexMin/Max` bound the combined band/fill geometry.
+
+The representation describes the sign of the full interior. Deep inactive values
+remain truncated ±background, so this does not compute exact deep distances.
+Polyscope's earlier fill geometry uses the identical sizes and -0.5 voxel corner
+alignment; this renderer reads the self-contained `.nvdb` masks directly instead
+of the legacy `.fill` companion file.
 
 ### Surface crossing (modes 0 and 2)
 
@@ -185,6 +219,8 @@ into caller-provided host storage. `sdf_probe` queries raw integer voxel coordin
 `sdf_error` exposes a thread-local error string; C++ exceptions never cross the C
 boundary. `sdf_close` releases the context. All these declarations and ctypes
 struct layouts must be changed together when extending the ABI.
+`sdf_abi_version()` returns 2 for this layout; Python rejects incompatible libraries.
+Old camera JSONs default the added `fillMask` to 31.
 
 Python serializes GPU use with a lock because context output buffers are reused.
 The threaded HTTP server serves `/`, `/info`, `/render`, and `/export`. Rendering
@@ -202,8 +238,9 @@ figures. These guards do not imply formal validation of the SDF itself.
 
 `test_viewer.py` generates independent float/index sphere references and small
 mask fixtures. It checks analytic silhouettes, equal float/index output in all
-six modes, both root formats, all mask levels, invalid metadata, negative
-coordinates, clip planes, inside-camera rays, active-band colors, tiled output
+seven modes, both root formats, all mask levels, invalid metadata, negative
+coordinates, clip planes, inside-camera rays, active-band colors, each native fill cube size in both root formats,
+fill toggles/clipping/bounds, tiled output
 identity, PNG CRCs/metadata and atomic failure handling.
 
 The existing MeshToSDF producer is intentionally not the reference for these

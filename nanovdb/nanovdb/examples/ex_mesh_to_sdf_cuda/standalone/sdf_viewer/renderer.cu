@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "render.cuh"
+#include "fill_geometry.h"
 #include <nanovdb/GridHandle.h>
 #include <nanovdb/io/IO.h>
 #include <cuda_runtime.h>
@@ -88,6 +89,7 @@ __global__ void probeKernel(const nanovdb::NanoGrid<BuildT>* grid, Channels chan
 }
 }
 
+extern "C" int sdf_abi_version() { return 2; }
 extern "C" const char* sdf_error() { return lastError.c_str(); }
 extern "C" void* sdf_open(const char* path, int32_t gridIndex, GridInfo* info) {
     try {
@@ -141,6 +143,22 @@ extern "C" void* sdf_open(const char* path, int32_t gridIndex, GridInfo* info) {
                 throw std::runtime_error("Float grid must be tagged LevelSet (density and UDF are not SDFs)");
             ctx->background=scalar->tree().background();
         }
+        Channels hostChannels=ctx->channels;
+        if(index) {
+            // Channel bindings above are grid-relative pointers; rebase onto host storage.
+            auto hostPointer=[&](auto ptr) {
+                using Pointer=decltype(ptr);
+                return ptr ? reinterpret_cast<Pointer>(reinterpret_cast<uintptr_t>(index)+
+                    (reinterpret_cast<uintptr_t>(ptr)-reinterpret_cast<uintptr_t>(ctx->grid.data))) : nullptr;
+            };
+            hostChannels.sdf=hostPointer(hostChannels.sdf);
+            hostChannels.leaf=hostPointer(hostChannels.leaf);
+            hostChannels.lower=hostPointer(hostChannels.lower);
+            hostChannels.upper=hostPointer(hostChannels.upper);
+            hostChannels.root=hostPointer(hostChannels.root);
+            hostChannels.denseRoot=hostPointer(hostChannels.denseRoot);
+            collectFill(*index,hostChannels,ctx->channels,*info);
+        } else collectFill(*scalar,hostChannels,ctx->channels,*info);
         if(!std::isfinite(ctx->background) || ctx->background<=0) throw std::runtime_error("SDF background must be finite and positive");
         check(cudaMemcpy(ctx->grid.data,host.data(),info->gridBytes,cudaMemcpyHostToDevice));
         ctx->exhausted.reserve(sizeof(int));
@@ -158,7 +176,7 @@ extern "C" int sdf_render(void* ptr,const RenderSettings* s,int32_t width,int32_
            tw<1 || th<1 || int64_t(x)+tw>width || int64_t(y)+th>height || int64_t(tw)*th>16777216 || samples<1 || samples>256)
             throw std::runtime_error("Invalid render dimensions or samples");
         if(!(s->step>=.05f && s->step<=1.f) || !(s->shell>0) || !(s->density>=0) ||
-           !(s->fov>0 && s->fov<175) || s->mode<0 || s->mode>5 || s->clipAxis< -1 || s->clipAxis>2)
+           !(s->fov>0 && s->fov<175) || s->mode<0 || s->mode>6 || s->clipAxis< -1 || s->clipAxis>2 || s->fillMask<0 || s->fillMask>31)
             throw std::runtime_error("Invalid render settings");
         if((s->mode<=2 && std::abs(s->iso)*c->voxelSize>=c->background) ||
            (s->mode==1 && (std::abs(s->iso)+s->shell)*c->voxelSize>=c->background))

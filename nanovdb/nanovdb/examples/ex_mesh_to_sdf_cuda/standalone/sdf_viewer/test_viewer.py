@@ -50,7 +50,7 @@ class RenderingTests(unittest.TestCase):
         self.assertGreater(tested, 15000)
 
     def test_index_masks_match_float_field_in_all_modes(self):
-        for mode in range(6):
+        for mode in range(7):
             settings = self.settings(mode=mode, clipAxis=2 if mode in (3,5) else -1, clipPosition=0)
             a = self.sphere.tile(settings, 128, 96, 0, 0, 128, 96, 4)
             b = self.index.tile(settings, 128, 96, 0, 0, 128, 96, 4)
@@ -104,6 +104,59 @@ class RenderingTests(unittest.TestCase):
         image=self.index.tile(self.settings(mode=4),64,64,0,0,64,64,1)
         center=image[(32*64+32)*4:(32*64+32)*4+4]
         self.assertGreater(center[2],center[0])
+
+    def test_full_space_fill_preserves_each_box_size(self):
+        # Independent one-box fixtures at every level: 1, 8, 128, 4096 voxels.
+        # The fixture intentionally extends outside the active-value bounding box.
+        for filename in ("masks.nvdb", "dense-masks.nvdb"):
+            renderer=Renderer(self.directory/filename,self.library)
+            try:
+                self.assertEqual(renderer.info["fillBoxes"],[1,1,1,1])
+                self.assertEqual(renderer.info["fillIndexMax"],[8191,4095,4095])
+                for level,dim,origin in [(0,1,[1,1,1]),(1,8,[8,0,0]),
+                                         (2,128,[128,0,0]),(3,4096,[4096,0,0])]:
+                    target=[v+(dim-1)/2 for v in origin]
+                    eye=target.copy();eye[2]+=2*dim
+                    data=renderer.defaults()
+                    data.update(mode=6,fillMask=1<<level,eye=eye,target=target,up=[0,1,0],
+                                orthographic=1,orthoScale=2*dim,transparent=1)
+                    settings=validate_settings(data)
+                    image=renderer.tile(settings,64,64,0,0,64,64,1)
+                    count=sum(a==255 for a in image[3::4])
+                    self.assertEqual(count,32*32,(filename,level))
+                    center=image[(32*64+32)*4:(32*64+32)*4+4]
+                    self.assertGreater(center[0],center[2])
+                    # Disabled level must disappear, with no inactive exterior cubes.
+                    data["fillMask"]=0
+                    hidden=renderer.tile(validate_settings(data),64,64,0,0,64,64,1)
+                    self.assertFalse(any(hidden[3::4]))
+                    # A clipping plane through the cube must expose the same sign.
+                    data.update(fillMask=1<<level,clipAxis=2,clipPosition=target[2])
+                    clipped=renderer.tile(validate_settings(data),64,64,0,0,64,64,1)
+                    self.assertEqual(sum(a==255 for a in clipped[3::4]),32*32)
+            finally:
+                renderer.close()
+
+    def test_fill_can_be_hidden_without_changing_active_band(self):
+        self.assertEqual(self.sphere.info["fillBoxes"],self.index.info["fillBoxes"])
+        self.assertGreater(self.index.info["fillBoxes"][0],0)
+        self.assertGreater(self.index.info["fillBoxes"][1],0)
+        active=self.index.tile(self.settings(mode=4,clipAxis=2,clipPosition=0),96,96,0,0,96,96,1)
+        band_only=self.index.tile(self.settings(mode=6,fillMask=16,clipAxis=2,clipPosition=0),96,96,0,0,96,96,1)
+        self.assertEqual(active,band_only)
+        fill=self.index.tile(self.settings(mode=6,fillMask=15,clipAxis=2,clipPosition=0),96,96,0,0,96,96,1)
+        center=fill[(48*96+48)*4:(48*96+48)*4+4]
+        self.assertEqual(center[3],255)
+        self.assertGreater(center[0],center[2])
+        # Fill traversal is independent of continuous-SDF march step.
+        a=self.index.tile(self.settings(mode=6,step=.125),96,96,0,0,96,96,1)
+        b=self.index.tile(self.settings(mode=6,step=1),96,96,0,0,96,96,1)
+        self.assertEqual(a,b)
+        # Strip rendering still agrees for the hierarchical mode.
+        settings=self.settings(mode=6,clipAxis=2,clipPosition=0)
+        whole=self.index.tile(settings,95,71,0,0,95,71,4)
+        strips=b"".join(self.index.tile(settings,95,71,0,y,95,min(13,71-y),4) for y in range(0,71,13))
+        self.assertEqual(whole,strips)
 
     def test_sign_slice_and_clip(self):
         settings = self.settings(mode=3,clipAxis=2,clipPosition=0)

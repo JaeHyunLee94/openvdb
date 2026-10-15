@@ -24,7 +24,7 @@ SDF(signed distance field)는 위치에서 표면까지의 거리와 내부/외�
 뷰어는 이 채널들을 모두 반영한다. `activeVoxelCount`는 narrow band의
 active voxel 개수이며 내부의 모든 공간 셀을 더한 수는 아니다.
 
-### 여섯 가지 보기 모드
+### 일곱 가지 보기 모드
 
 | 모드 | 표시하는 양 | 용도와 해석 |
 |---|---|---|
@@ -34,6 +34,7 @@ active voxel 개수이며 내부의 모든 공간 셀을 더한 수는 아니다
 | Sign slice · full field | 비활성 영역을 포함한 단면의 nearest voxel sign | 깊은 내부/외부, cavity 확인 |
 | Signed active voxels | 실제 active voxel의 unit cube | 전체 narrow band의 ± voxel을 입체적으로 확인 |
 | Sign slice · active band | 단면의 active voxel만 표시 | band 폭과 양쪽 부호를 직접 확인 |
+| Full-space signed cells | active band + invert mask의 비활성 내부 fill | 1³·8³·128³·4096³ 계층 크기를 보존해 내부 공간 확인 |
 
 **Sign 모드의 주황색은 음수(내부), 파란색은 양수(외부)**다. 표면에 가까운
 작은 `abs(sdf)` 값은 full-field 단면에서만 밝게 섞인다. 밝은 띠는 별도 sign 분류가 아니다.
@@ -147,6 +148,53 @@ Z=0 단면에서도 양수 3,494개, 음수 6,591개의 active voxel이 있었�
 카메라 버튼을 누른다. `Fit`은 최초 카메라 구도를 복원하므로 sign slice를 보던
 중에는 축 버튼을 다시 누를 수 있다. 회전된 grid의 index 단면은 world 축
 카메라와 일치하지 않을 수 있다. 기본 MeshToSDF driver의 변환은 회전이 없다.
+
+### 내부 공간과 invert mask 확인
+
+`View → Full-space signed cells`를 선택한다. 이 모드는 active narrow band에
+PropagateSign의 **비활성 음수 영역**까지 추가한다. 내부 fill은 음수 active
+voxel과 같은 주황색이며, 외부 active voxel은 파란색이다.
+
+| 저장 위치 | 한 큐브의 크기 (voxel 단위) | 실제 world 한 변 |
+|---|---|---|
+| leaf invert의 inactive voxel | 1³ | voxelSize |
+| lower invert의 childless tile | 8³ | 8 × voxelSize |
+| upper invert의 childless tile | 128³ | 128 × voxelSize |
+| root interior | 4096³ | 4096 × voxelSize |
+
+`Clip / slice axis = Z`와 중앙 `Plane`으로 내부를 잘라 보자. 경계 근처의 작은
+voxel과 깊은 내부의 큰 tile 경계가 함께 보인다. 같은 색을 유지하면서 셀 크기
+차이를 확인할 수 있다. 바깥에서 보면 band가 내부를 가리므로 clip이 필요하다.
+
+**Interior fill** 패널에서 `Active narrow band`와 네 계층을 개별적으로 켜고 끌
+수 있다. band를 끄면 fill만 남고, lower를 끄면 8³ tile이 차지하던 내부 영역이
+비어 보인다. 계층 옆 숫자는 저장된 inactive box 개수이며 active voxel은 제외한다.
+큰 tile 하나를 1³ voxel 여러 개로 펼친 개수가 아니다. 예를 들어 8³ tile 하나는
+512개 voxel의 공간을 표현하지만 UI에는 box 1개로 센다.
+
+개발용 bunny에는 1³ fill 1,567,773개, 8³ fill 17,793개가 있다. 128³·4096³
+fill은 이 해상도의 bunny에 없으므로 0개로 표시된다. 큰 계층도 renderer가 지원하며,
+각 크기의 독립 fixture로 검증한다.
+
+더 높은 해상도인 bunny(dx=0.001, band=3)에서는 active voxel 33,978,756개와
+1³ fill 27,898,860개, 8³ fill 700,271개, **128³ fill 165개**를 얻었다. 현재
+로컬 데모는 이 데이터로 띄워서 작은 voxel, 중간 tile, 큰 tile을 동시에 확인할
+수 있게 했다. 4K 결과는 `output/bunny-hi-full-space-4k.png`에 저장한다.
+
+원래 Polyscope의 `FILL_LEVELS`와 같은
+저장 단위 및 `base - 0.5 voxel` 모서리 정렬을 쓴다.
+
+이 모드는 0 등치면을 재구성하거나 누락된 sign을 추측하지 않는다. 이미 저장된
+mask의 음수 영역을 표시한다. **내부 sign을 전체 공간에 표현하는 것과, 표면까지의
+정확한 거리를 깊은 내부까지 계산하는 것은 구분해야 한다.** 이 파일 형식에서
+band 밖 거리 크기는 ±background로 잘려 있고, 해당 위치의 부호만 mask로 복원한다.
+양수 비활성 외부 공간은 무한하므로 큐브로 채워 표시하지 않는다.
+
+예전 camera JSON도 사용할 수 있다. 새 `fillMask` 설정이 없으면 모든 그룹을
+켜는 값 31을 사용한다. headless 재현에서는 `fillMask=15`로 fill만, 16으로 band만
+표시할 수 있다. Python/CUDA 인터페이스가 바뀌었으므로 업데이트 후 backend를
+다시 빌드해야 한다. ABI 오류가 보이면 `cmake --build build --target sdf_renderer`를
+실행하고 서버를 재시작한다.
 
 ## 4. 카메라와 렌더 설정
 

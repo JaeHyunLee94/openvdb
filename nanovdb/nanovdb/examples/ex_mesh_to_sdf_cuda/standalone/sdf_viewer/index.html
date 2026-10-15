@@ -9,7 +9,7 @@
 <aside>
 <h1>Mesh → SDF</h1><div class="small">Sparse grid · CUDA rendering</div>
 <h2>Display</h2>
-<label>View<select id="mode"><option value="0">SDF surface</option><option value="1">Transmittance volume</option><option value="2">Surface normals</option><option value="3">Sign slice · full field</option><option value="4">Signed active voxels</option><option value="5">Sign slice · active band</option></select></label>
+<label>View<select id="mode"><option value="0">SDF surface</option><option value="1">Transmittance volume</option><option value="2">Surface normals</option><option value="3">Sign slice · full field</option><option value="4">Signed active voxels</option><option value="5">Sign slice · active band</option><option value="6">Full-space signed cells</option></select></label>
 <label>Projection<select id="orthographic"><option value="0">Perspective</option><option value="1">Orthographic</option></select></label>
 <label>Surface color<input id="color" type="color" value="#4281d7"></label>
 <label>Background<input id="background" type="color" value="#ffffff"></label>
@@ -26,7 +26,16 @@
 <label>Clip / slice axis<select id="clipAxis"><option value="-1">Off</option><option value="0">X</option><option value="1">Y</option><option value="2">Z</option></select></label>
 <label>Plane<input id="plane" type="range" min="0" max="1" step="0.0001" value="0.5"><output id="planeValue"></output></label>
 <div class="row"><button id="fit">Fit</button><button data-axis="0">X</button><button data-axis="1">Y</button><button data-axis="2">Z</button></div>
-<p class="small">Signed active voxels draws unit cubes: orange −, blue +. Clip to reveal the inner band. Active-band slice hides inactive voxels; full-field slice includes deep interior.</p>
+<p class="small">Signed active voxels draws unit cubes: orange −, blue +. Clip to reveal the inner band. Active-band slice hides inactive voxels. Full-space signed cells adds hierarchical interior fill.</p>
+<div id="fillControls" hidden>
+<h2>Interior fill</h2>
+<label>Active narrow band<input data-fill-bit="4" type="checkbox" checked></label>
+<label>Leaf · 1³ <span id="fillCount0" class="small"></span><input data-fill-bit="0" type="checkbox" checked></label>
+<label>Lower · 8³ <span id="fillCount1" class="small"></span><input data-fill-bit="1" type="checkbox" checked></label>
+<label>Upper · 128³ <span id="fillCount2" class="small"></span><input data-fill-bit="2" type="checkbox" checked></label>
+<label>Root · 4096³ <span id="fillCount3" class="small"></span><input data-fill-bit="3" type="checkbox" checked></label>
+<p class="small">Counts are stored negative inactive boxes, not expanded voxels. All fill uses the same orange sign color. Clip the object to see its interior.</p>
+</div>
 <h2>Quality</h2>
 <label>Preview<select id="preview"><option value="640">640 px</option><option value="960" selected>960 px</option><option value="1440">1440 px</option><option value="1920">1920 px</option></select></label>
 <label>Ray step (voxels)<select id="step"><option value="1">1.0 · fast</option><option value="0.5" selected>0.5 · balanced</option><option value="0.25">0.25 · fine</option><option value="0.125">0.125 · finest</option></select></label>
@@ -59,14 +68,18 @@ function toLinear(x){return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;}
 function toSrgb(x){return x<=.0031308?12.92*x:1.055*x**(1/2.4)-.055;}
 function hex(a){return '#'+a.map(v=>Math.round(Math.max(0,Math.min(1,toSrgb(v)))*255).toString(16).padStart(2,'0')).join('');}
 function color(h){return [1,3,5].map(i=>toLinear(parseInt(h.slice(i,i+2),16)/255));}
-function planeBounds(){const a=Math.max(0,settings.clipAxis);return [grid.indexMin[a]-1,grid.indexMax[a]+1];}
+function planeBounds(){const a=Math.max(0,settings.clipAxis),lo=settings.mode===6?grid.fillIndexMin:grid.indexMin,hi=settings.mode===6?grid.fillIndexMax:grid.indexMax;return [lo[a]-1,hi[a]+1];}
 function labels(){
   for(const id of ['ao','exposure','density'])$(id+'Value').textContent=(+settings[id]).toFixed(2);
   $('planeValue').textContent=settings.clipPosition.toFixed(1);
   $('volumeControls').hidden=settings.mode!==1;
+  $('fillControls').hidden=settings.mode!==6;
   $('legend').style.display=settings.mode>=3?'block':'none';
 }
 function sync(){
+  settings.fillMask??=31;
+  for(const box of document.querySelectorAll('[data-fill-bit]'))box.checked=!!(settings.fillMask&(1<<+box.dataset.fillBit));
+  for(let i=0;i<4;++i)$('fillCount'+i).textContent=grid.fillBoxes[i].toLocaleString()+' boxes';
   for(const id of scalarIds)$(id).value=settings[id];
   for(const id of ['color','background'])$(id).value=hex(settings[id]);
   $('transparent').checked=!!settings.transparent;
@@ -121,6 +134,7 @@ for(const id of scalarIds)$(id).addEventListener('input',()=>{
   }
   sync();changed();
 });
+for(const box of document.querySelectorAll('[data-fill-bit]'))box.onchange=()=>{const bit=1<<+box.dataset.fillBit;settings.fillMask=box.checked?(settings.fillMask|bit):(settings.fillMask&~bit);changed();};
 for(const id of ['color','background'])$(id).addEventListener('input',()=>{settings[id]=color($(id).value);changed();});
 $('transparent').onchange=()=>{settings.transparent=+$('transparent').checked;changed();};
 $('plane').oninput=()=>{const[a,b]=planeBounds();settings.clipPosition=a+(b-a)*+$('plane').value;changed(true);};

@@ -64,7 +64,9 @@ template<typename BuildT>
 __device__ Pixel traceVoxels(const nanovdb::NanoGrid<BuildT>& grid, Field<BuildT>& field,
                             Vec o, Vec d, Vec worldDirection, const RenderSettings& s, int* exhausted) {
     Pixel result;
-    Vec lo(grid.indexBBox().min()), hi=Vec(grid.indexBBox().max())+Vec(1.f);
+    const bool full=s.mode==6;
+    Vec lo(full?field.channels.fillMin:grid.indexBBox().min());
+    Vec hi=Vec(full?field.channels.fillMax:grid.indexBBox().max())+Vec(1.f);
     if(s.clipAxis>=0) hi[s.clipAxis]=fminf(hi[s.clipAxis],s.clipPosition+.5f);
     if(hi[0]<=lo[0] || hi[1]<=lo[1] || hi[2]<=lo[2]) return result;
     float t0,t1;
@@ -76,10 +78,23 @@ __device__ Pixel traceVoxels(const nanovdb::NanoGrid<BuildT>& grid, Field<BuildT
     int visits=0;
     do {
         if(++visits>2000000) { atomicExch(exhausted,1); return result; }
-        hdda.update(ray,dimAt(hdda.voxel()));
+        // Probe the actual entry point, clamped to this HDDA cell. Probing only
+        // a coarse cell origin can miss a child under a different corner.
+        Coord query=floorCoord(ray(hdda.time()));
+        for(int axis=0;axis<3;++axis)
+            query[axis]=max(hdda.voxel()[axis],min(query[axis],hdda.voxel()[axis]+hdda.dim()-1));
+        hdda.update(ray,dimAt(query));
         const Coord cell=hdda.voxel();
-        if(hdda.dim()!=1 || hdda.next()<=hdda.time() || !field.acc.isActive(cell)) continue;
-        const Vec local=ray(hdda.time())-Vec(cell)-Vec(.5f);
+        const int dim=hdda.dim();
+        if(hdda.next()<=hdda.time()) continue;
+        const bool active=field.acc.isActive(cell);
+        const float value=field.getValue(cell);
+        const int level=dim==1?0:(dim==8?1:(dim==128?2:3));
+        if(full) {
+            const bool visible=active ? (s.fillMask&16)!=0 : (signbit(value) && (s.fillMask&(1<<level))!=0);
+            if(!visible) continue;
+        } else if(dim!=1 || !active) continue;
+        const Vec local=(ray(hdda.time())-Vec(cell))/float(dim)-Vec(.5f);
         int axis=0;
         if(fabsf(local[1])>fabsf(local[axis])) axis=1;
         if(fabsf(local[2])>fabsf(local[axis])) axis=2;
@@ -89,7 +104,7 @@ __device__ Pixel traceVoxels(const nanovdb::NanoGrid<BuildT>& grid, Field<BuildT
         n=unit(grid.indexToWorldGradF(n));
         float edge=1.f;
         for(int a=0;a<3;++a) if(a!=axis && fabsf(local[a])>.465f) edge=.58f;
-        const Vec color=signbit(field.getValue(cell))?Vec(.85f,.15f,.045f):Vec(.04f,.32f,.8f);
+        const Vec color=signbit(value)?Vec(.85f,.15f,.045f):Vec(.04f,.32f,.8f);
         result.rgb=color*((.38f+.62f*fabsf(n.dot(worldDirection)))*edge);
         result.alpha=1.f;
         return result;
@@ -107,7 +122,7 @@ __device__ Pixel trace(const nanovdb::NanoGrid<BuildT>& grid, Channels channels,
     Vec lo = Vec(grid.indexBBox().min()) - Vec(1.f);
     Vec hi = Vec(grid.indexBBox().max()) + Vec(1.f);
     Pixel result;
-    if (s.mode == 4) return traceVoxels(grid,field,o,d,direction,s,exhausted);
+    if (s.mode == 4 || s.mode == 6) return traceVoxels(grid,field,o,d,direction,s,exhausted);
     if (s.mode == 3 || s.mode == 5) {
         const int axis = s.clipAxis < 0 ? 2 : s.clipAxis;
         if (fabsf(d[axis]) < 1.e-12f) return result;

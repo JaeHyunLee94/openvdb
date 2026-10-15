@@ -22,13 +22,13 @@ HERE = Path(__file__).resolve().parent
 class Settings(C.Structure):
     _fields_ = [(k, C.c_float * 3) for k in ("eye", "target", "up", "color", "background")] + [
         (k, C.c_float) for k in ("fov", "orthoScale", "step", "iso", "density", "shell", "ao", "exposure", "clipPosition")
-    ] + [(k, C.c_int32) for k in ("mode", "clipAxis", "orthographic", "transparent")]
+    ] + [(k, C.c_int32) for k in ("mode", "clipAxis", "orthographic", "transparent", "fillMask")]
 
 
 class GridInfo(C.Structure):
     _fields_ = [(k, C.c_double * 3) for k in ("worldMin", "worldMax", "voxelSize")] + [
         (k, C.c_int32 * 3) for k in ("indexMin", "indexMax")
-    ] + [(k, C.c_uint64) for k in ("activeVoxels", "gridBytes", "freeDeviceBytes")] + [("indexGrid", C.c_int32)]
+    ] + [(k, C.c_uint64) for k in ("activeVoxels", "gridBytes", "freeDeviceBytes")] + [("indexGrid", C.c_int32)] + [(k, C.c_int32 * 3) for k in ("fillIndexMin", "fillIndexMax")] + [("fillBoxes", C.c_uint64 * 4)]
 
 
 def as_dict(value):
@@ -41,7 +41,7 @@ def validate_settings(data):
         raise ValueError("settings must be an object")
     result = Settings()
     for name, kind in Settings._fields_:
-        value = data[name]
+        value = data.get(name, 31) if name == "fillMask" else data[name]
         if issubclass(kind, C.Array):
             if not isinstance(value, list) or len(value) != 3:
                 raise ValueError(f"{name} must contain three numbers")
@@ -60,10 +60,12 @@ def validate_settings(data):
         raise ValueError("step must be .05–1, shell .001–1000, density 0–100")
     if not (1 <= result.fov <= 170 and result.orthoScale > 0 and -10 <= result.exposure <= 10 and 0 <= result.ao <= 2):
         raise ValueError("invalid camera or lighting settings")
-    if result.mode not in range(6) or result.clipAxis not in range(-1, 3):
+    if result.mode not in range(7) or result.clipAxis not in range(-1, 3):
         raise ValueError("invalid mode / clipping axis")
     if result.orthographic not in (0, 1) or result.transparent not in (0, 1):
         raise ValueError("invalid projection / background setting")
+    if not 0 <= result.fillMask <= 31:
+        raise ValueError("fillMask must be in 0–31")
     f = [result.target[i] - result.eye[i] for i in range(3)]
     cross = [f[1]*result.up[2]-f[2]*result.up[1], f[2]*result.up[0]-f[0]*result.up[2], f[0]*result.up[1]-f[1]*result.up[0]]
     if sum(v*v for v in cross) < 1e-20:
@@ -74,6 +76,13 @@ def validate_settings(data):
 class Renderer:
     def __init__(self, path, library, grid_index=0):
         self.lib = C.CDLL(str(library))
+        try:
+            self.lib.sdf_abi_version.restype = C.c_int
+            abi = self.lib.sdf_abi_version()
+        except AttributeError:
+            abi = 1
+        if abi != 2:
+            raise RuntimeError("Rebuild sdf_renderer: Python requires renderer ABI 2")
         self.lib.sdf_error.restype = C.c_char_p
         self.lib.sdf_open.argtypes = [C.c_char_p, C.c_int32, C.POINTER(GridInfo)]
         self.lib.sdf_open.restype = C.c_void_p
@@ -109,7 +118,7 @@ class Renderer:
         return dict(eye=eye, target=center, up=[0, 1, 0], color=[.055, .22, .68], background=[1, 1, 1],
                     fov=38, orthoScale=radius*2.3, step=.5, iso=0, density=2, shell=1,
                     ao=.6, exposure=0, clipPosition=(self.info["indexMin"][2]+self.info["indexMax"][2])/2,
-                    mode=0, clipAxis=-1, orthographic=0, transparent=0)
+                    mode=0, clipAxis=-1, orthographic=0, transparent=0, fillMask=31)
 
     def tile(self, settings, width, height, x, y, tw, th, samples):
         pixels = (C.c_uint8 * (tw*th*4))()

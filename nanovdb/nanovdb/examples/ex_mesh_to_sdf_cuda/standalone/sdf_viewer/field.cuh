@@ -18,6 +18,7 @@ struct Channels {
     uint64_t rootCount = 0;
     const uint8_t* denseRoot = nullptr;
     Coord rootMin{0}, rootDims{0};
+    Coord fillMin{0}, fillMax{0};
 };
 
 template<typename BuildT>

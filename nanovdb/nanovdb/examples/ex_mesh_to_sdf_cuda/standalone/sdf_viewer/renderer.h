@@ -8,17 +8,21 @@ struct RenderSettings {
     float color[3], background[3];
     float fov, orthoScale, step, iso, density, shell, ao, exposure;
     float clipPosition; // index coordinate of the clipping/slice plane
-    int32_t mode;      // 0 surface, 1 shell volume, 2 normals, 3 full sign slice, 4 active cubes, 5 active sign slice
+    int32_t mode;      // 0 surface, 1 shell volume, 2 normals, 3 full sign slice, 4 active cubes, 5 active sign slice, 6 band + hierarchical inside fill
     int32_t clipAxis;  // -1 disabled; 0,1,2 index-space X,Y,Z; keep <= plane
     int32_t orthographic, transparent;
+    int32_t fillMask; // mode 6: bits 0..3 = inactive fill sizes 1,8,128,4096; bit 4 = active band
 };
 struct GridInfo {
     double worldMin[3], worldMax[3], voxelSize[3];
     int32_t indexMin[3], indexMax[3];
     uint64_t activeVoxels, gridBytes, freeDeviceBytes;
     int32_t indexGrid;
+    int32_t fillIndexMin[3], fillIndexMax[3];
+    uint64_t fillBoxes[4]; // childless negative regions per level; excludes active voxels
 };
 extern "C" {
+int sdf_abi_version();
 const char* sdf_error();
 void* sdf_open(const char* path, int32_t gridIndex, GridInfo* info);
 void sdf_close(void* context);

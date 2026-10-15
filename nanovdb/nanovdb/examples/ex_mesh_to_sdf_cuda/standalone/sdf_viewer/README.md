@@ -90,6 +90,12 @@ The renderer itself does not need that extra dependency or the MeshToSDF headers
 - **Sign slice · active band** displays only active voxels on a plane, with uniform
   sign colors. Use this to inspect the full narrow-band width. Use 1 spp for raw
   pixel-level sign inspection; supersampling can mix adjacent colors.
+- **Full-space signed cells** adds the negative inactive regions stored in
+  PropagateSign's invert masks to the active band. Leaf/lower/upper/root fill is
+  drawn as 1³/8³/128³/4096³ cubes, preserving sparse storage granularity. All
+  negative cells have the same orange base color. The **Interior fill** controls
+  independently toggle the band and four fill levels, with stored-box counts.
+  Enable clipping to see the filled interior; turn off the band to inspect fill alone.
 - Clip/slice planes use **index-space** axes and coordinates. Surface clipping
   keeps the region at or below the plane; it does not cap the cut with a new surface.
   The slice auto-view assumes the unrotated transform used by the MeshToSDF driver.
@@ -190,8 +196,9 @@ python3 test_viewer.py
 ```
 
 Tests check analytic sphere silhouettes, byte-identical float/index-mask images
-in all six modes, all four sign-mask levels including negative coordinates, both root formats,
-active voxel cubes and band-only slices,
+in all seven modes, all four sign-mask levels including negative coordinates, both root formats,
+active voxel cubes and band-only slices, native-size interior fill, per-level
+visibility, fill extending beyond active bounds,
 tiled/full-frame equivalence, rays starting inside the object and parallel to
 box planes, clipping, PNG CRC/metadata, invalid inputs and atomic output failure.
 The fixtures are independent of MeshToSDF so renderer correctness is not inferred
@@ -234,3 +241,50 @@ built against the clean committed base `a1d407f2a`, not only the development
 working tree. The converter uses the existing producer code and its CCCL dependency;
 the viewer's root-format decoder supports its dense root mask as well as the
 newer coordinate-list output.
+
+## Visualizing full-space interior fill
+
+Select **Full-space signed cells**, choose a clipping axis and move the plane
+through the object. This renders negative inactive cells as stored, rather than
+expanding all coarse tiles to unit voxels. Toggle **Active narrow band** off to
+isolate fill; toggle the four levels separately to inspect the representation.
+The displayed counts exclude active voxels and child pointers, so leaf invert
+bits that also mark active negative voxels are not counted twice.
+
+The existing [Polyscope fill implementation](../../scripts/mesh_to_sdf_viewer.py)
+uses the same sizes and half-voxel corner convention. The GPU viewer retains
+that convention while tracing the hierarchy directly, without allocating one
+mesh or cube instance per inactive voxel. World cube side length is the listed
+size times `voxelSize`.
+
+For the tested bunny (`voxelSize=0.004`, band=3), stored inactive fill consists
+of 1,567,773 leaf voxels and 17,793 lower tiles (8³ each); no upper/root fill is
+present. Zero in a level's count means that dataset has no stored negative fill
+at that level. All four levels, including 128³ and 4096³, are independently tested
+with coordinate-list and dense root-mask fixtures. The saved hairball dataset
+has zero inactive fill boxes according to its masks; the viewer does not invent
+interior where the input masks contain none.
+
+Local demo (outputs remain ignored by Git):
+
+```bash
+python3 viewer.py output/bunny.nvdb --settings output/bunny-full-space-camera.json --port 8766 --open
+python3 viewer.py output/bunny.nvdb --settings output/bunny-full-space-camera.json \
+  --render output/bunny-full-space-4k.png --width 3840 --height 2160 --samples 4
+```
+
+Old camera JSONs remain supported: missing `fillMask` defaults to 31 (all groups).
+`fillMask` bits 0,1,2,3 select inactive sizes 1,8,128,4096; bit 4 selects the active
+band. A value of 15 shows fill only, 16 shows band only, and 0 hides all cells in
+this mode. Rebuild the CUDA library after updating: Python and the renderer now
+check ABI version 2 to prevent accidentally using an older struct layout.
+
+For a real three-level example, `bunny.obj` at `voxelSize=0.001`, band=3 produced
+33,978,756 active voxels and inactive fill counts `[27,898,860, 700,271, 165, 0]`
+for sizes `[1,8,128,4096]`. The saved development outputs are
+`output/bunny-hi-fill.nvdb`, `output/bunny-hi-full-space-camera.json`, and
+`output/bunny-hi-full-space-4k.png`. These remain local, ignored files. Start with:
+
+```bash
+python3 viewer.py output/bunny-hi-fill.nvdb --settings output/bunny-hi-full-space-camera.json --port 8766 --open
+```
