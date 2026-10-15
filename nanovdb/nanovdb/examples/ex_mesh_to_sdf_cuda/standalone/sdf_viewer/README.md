@@ -288,3 +288,13 @@ for sizes `[1,8,128,4096]`. The saved development outputs are
 ```bash
 python3 viewer.py output/bunny-hi-fill.nvdb --settings output/bunny-hi-full-space-camera.json --port 8766 --open
 ```
+
+## Verify root filling in PropagateSign
+
+The renderer fixtures test mask **decoding**. To test the actual library algorithm,
+use [the root-fill validation tool](ROOT_FILL_VALIDATION.md). It compares the real
+GPU root flood to independent CPU BFS in 14 cases and runs the complete
+PropagateSign pipeline in 5 additional sparse-topology cases, including negative
+coordinates, all-positive signs, multiple root tiles and no missing root positions.
+It can export actual generated masks for visual inspection without allocating a
+dense multi-billion-voxel surface. See the linked guide for exact scope and commands.

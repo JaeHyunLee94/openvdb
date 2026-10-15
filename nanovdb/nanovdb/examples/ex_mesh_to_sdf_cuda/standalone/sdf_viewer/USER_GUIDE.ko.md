@@ -269,3 +269,33 @@ voxel은 float sidecar만 약 39.5 GB라 같은 GPU에서 그대로 재현할 �
 SSH에서는 `ssh -L 8765:127.0.0.1:8765 HOST`로 포트를 전달한 뒤 로컬 브라우저로
 연다. 서버는 loopback에만 bind하고 외부 CDN을 사용하지 않는다. 인증이 있는
 다중 사용자 웹 서비스로 설계된 도구는 아니다.
+
+## 7. Root tile을 채우는 알고리즘 검증
+
+이전 renderer fixture는 주어진 root mask를 **읽고 그리는 것**을 검증했다.
+실제 `PropagateSign.cuh`가 root mask를 만드는 과정은 별도 실행 파일로 검사한다.
+
+```bash
+cmake -S . -B build -DBUILD_ROOT_FILL_VALIDATION=ON
+cmake --build build --target sdf_validate_root_fill -j2
+build/sdf_validate_root_fill --output output/root-fill-validation.nvdb
+```
+
+실제 GPU root flood와 독립 CPU BFS를 비교하는 14개 사례, leaf부터 root까지
+전체 전파를 실행하는 5개 사례가 있다. 중앙 root tile 1개 생성, 양수만 있을 때
+0개, 음수 좌표, 여러 내부 tile 24개, Upper child가 모든 root 위치를 차지할 때
+0개 등을 확인한다. 모든 예상 좌표의 집합을 비교하고 중복·정렬·child 겹침도 검사한다.
+
+합성 root-scale sparse topology를 쓰므로 거대한 실제 mesh나 수십억 voxel
+할당이 필요 없다. 이는 root 로직 검증이며 triangle rasterization이나 mesh
+signing의 모든 경우를 증명하는 테스트는 아니다. 자세한 설계와 범위는
+[ROOT_FILL_VALIDATION.md](ROOT_FILL_VALIDATION.md)를 참고한다.
+
+실제 GPU 출력 mask를 저장한 파일은 다음과 같이 볼 수 있다.
+
+```bash
+python3 viewer.py output/root-fill-validation.nvdb --port 8767 --open
+```
+
+`Full-space signed cells`에서 **Root만 켜면 4096³ 주황 큐브 1개**가 남는다.
+다른 계층을 함께 켜고 중앙을 clipping하면 작은 fill과 root tile의 관계가 보인다.
