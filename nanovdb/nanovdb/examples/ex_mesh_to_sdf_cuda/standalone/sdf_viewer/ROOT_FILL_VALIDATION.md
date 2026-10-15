@@ -161,3 +161,10 @@ Header fingerprints for the validated runs (SHA-256):
 
 - Working tree, tuple-return API: `681c7086c4c023d82cece05dbc9b98161cc79188e104d6f32aa15fc8af1244f0`
 - Committed header, owning-getter API: `1b3837eb6461e6d3ce2064cae2cfbdd43d98e819aa5cb438bc96502b9c861214`
+
+## Actual triangle-mesh companion test
+
+[REAL_MESH_ROOT_VALIDATION.md](REAL_MESH_ROOT_VALIDATION.md) adds a real closed
+cube OBJ test at progressively smaller voxel sizes. Unlike the synthetic topology
+fixtures above, it runs the complete existing MeshToSDF converter and verifies
+its exported root origins against independent analytic cube geometry.

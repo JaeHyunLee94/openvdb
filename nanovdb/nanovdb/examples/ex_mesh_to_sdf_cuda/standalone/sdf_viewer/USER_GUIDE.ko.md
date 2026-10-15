@@ -299,3 +299,36 @@ python3 viewer.py output/root-fill-validation.nvdb --port 8767 --open
 
 `Full-space signed cells`에서 **Root만 켜면 4096³ 주황 큐브 1개**가 남는다.
 다른 계층을 함께 켜고 중앙을 clipping하면 작은 fill과 root tile의 관계가 보인다.
+
+## 8. 실제 mesh의 voxel size를 줄여 root tile 검증하기
+
+가능하다. 실제 닫힌 cube OBJ(26 vertices, 48 triangles)를 기존 MeshToSDF에
+넣어 확인했다. 변 길이 2 기준 voxel size를 약 `0.000487329435`로 줄이자
+active voxel 303,170,734개와 root tile **1개, index origin `(0,0,0)`**가 생성됐다.
+이 root tile은 내부 sample 4096³개(약 687억 개)의 부호를 표현한다.
+
+root 격자 정렬 때문에 원본 mesh의 **복사본만 평행이동**했다. 크기·형상·위상은
+동일하고 원본 OBJ와 library는 수정하지 않았다. 합성 mask를 넣은 결과가 아니라
+실제 triangle rasterization부터 PropagateSign까지 실행한 출력이다.
+
+```bash
+cmake -S . -B build -DBUILD_ROOT_FILL_VALIDATION=ON -DBUILD_MESH_CONVERTER=ON
+cmake --build build --target sdf_from_mesh sdf_check_cube_mesh_roots sdf_renderer -j2
+python3 validate_cube_mesh_root.py /path/to/cube.obj --resolution 4096 --probe
+python3 viewer.py output/mesh-root/cube-r4096.nvdb --port 8768 --open
+```
+
+독립 기하 oracle로 root 좌표 집합·정렬·Upper child 겹침·실제 경계 이탈을
+검사했고, GPU 부호 조회 2,197점도 통과했다. 작은 해상도 512/1024에서는
+예상대로 root가 0개다. viewer에서 `Full-space signed cells`를 고르고 Root만
+남기면 큰 주황 cube 1개를 볼 수 있다. active band와 다른 fill도 켠 뒤
+clipping하면 경계와 root의 관계를 확인할 수 있다.
+
+4096 실행의 관측 GPU 전체 사용량 최대는 약 **10.09 GiB**였고, 다른 프로세스의
+기존 사용량도 포함한다. 복잡한 mesh나 더 넓은 band는 메모리가 부족할 수 있다.
+임의 mesh의 검증 oracle은 제공하지 않으며, 이 도구의 기하 검증 입력은 닫힌
+축 정렬 cube로 제한한다. 일반 mesh에서도 root 생성 원리는 같지만, 완전한
+4096³ 블록이 표면에서 떨어져 내부에 들어가야 한다.
+
+정렬 방법, 정확한 build 옵션, 측정표와 4K export는
+[REAL_MESH_ROOT_VALIDATION.md](REAL_MESH_ROOT_VALIDATION.md)를 참고한다.

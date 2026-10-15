@@ -298,3 +298,9 @@ PropagateSign pipeline in 5 additional sparse-topology cases, including negative
 coordinates, all-positive signs, multiple root tiles and no missing root positions.
 It can export actual generated masks for visual inspection without allocating a
 dense multi-billion-voxel surface. See the linked guide for exact scope and commands.
+
+For **real OBJ → MeshToSDF → root fill** testing, see
+[the real-mesh validation guide](REAL_MESH_ROOT_VALIDATION.md). A translated copy
+of a closed cube at voxel size 0.000487329435 produced 303,170,734 active voxels
+and exactly one actual 4096³ root tile. Independent geometric checks and 2,197
+GPU sign probes passed. The guide includes reproduction and memory measurements.
