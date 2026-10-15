@@ -316,3 +316,18 @@ voxels, one fully contained root `(0,0,0)`, and 1,749 independent sign compariso
 Its band=2 counterpart returned 14 exterior roots in addition to the correct
 interior root and is explicitly recorded as a failure. Both use unchanged library
 sources; the optional managed driver allowed the conversion to exceed VRAM.
+
+## Polyscope root diagnostics
+
+[The Polyscope root viewer](POLYSCOPE_ROOT_VIEWER.md) reuses the original viewer's
+sparse-grid convention and sign palette. It reads actual `.nvdb` root metadata,
+draws one 4096³ cell per root, overlays the matching triangle mesh, and optionally
+draws negative 128³ fill. Passing/failing bunny datasets can be compared side by
+side. This establishes no fixed Polyscope voxel-count ceiling; root inspection
+requires a few coarse cells rather than registering billions of active voxels.
+
+With `--all-levels`, the Polyscope viewer also registers exact ROI-selected
+1³/8³/128³/4096³ inactive fill and signed active voxels, with one toggle per group.
+The default root-center slab was exercised on the high-resolution bunny; all cell
+sizes remain native. `--roi` selects another region, and `--whole-grid` explicitly
+registers an entire smaller grid without sampling or an application count cap.

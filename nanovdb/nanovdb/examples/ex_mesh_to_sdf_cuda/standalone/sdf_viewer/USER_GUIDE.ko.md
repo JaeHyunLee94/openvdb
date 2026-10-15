@@ -373,3 +373,59 @@ python3 viewer.py output/general-mesh-root/band3/bunny-r4096.nvdb \
 이 로컬 preset은 active band와 Root를 함께 보여주고 중앙을 clipping한다.
 Leaf/Lower/Upper도 켜면 전체 fill을 볼 수 있다. 모든 음수 cell은 같은 주황색이고,
 크기는 실제 계층에 따라 다르다. preset과 4K PNG는 출력 파일로 Git에 올리지 않는다.
+
+## 10. Polyscope에서 실제 root tile 보기
+
+Polyscope에 고정된 복셀 수 제한이 있다고 전제했던 설명은 부정확했다.
+기존 `scripts/mesh_to_sdf_viewer.py`도 root를 sparse grid cell 하나로 그린다.
+이번 별도 viewer는 같은 좌표 규약과 sign 색상을 재사용해 실제 `.nvdb`의
+root mask를 읽는다. 기존 viewer와 library는 수정하지 않았다.
+
+```bash
+cmake --build build --target sdf_export_polyscope_roots -j2
+/home/jaehlee/Desktop/work/.venv/bin/python polyscope_root_viewer.py \
+  output/general-mesh-root/band3/bunny-r4096.nvdb --label 'band 3' --upper-fill
+```
+
+주황 cell은 실제 negative root(4096³), 반투명 bunny는 converter에 넣은 triangle
+mesh 참조다. SDF zero crossing으로 만든 표면이 아니다. `--upper-fill`로 읽은
+128³ fill 103,346개도 별도 구조로 켤 수 있다. 기본적으로 active voxel 19억 개를
+등록하지 않고, 모든 실제 root를 원래 크기로 표시한다. Upper child 컨테이너와
+unmarked root 위치도 UI에서 켜서 root-scale topology를 확인할 수 있다.
+
+```bash
+/home/jaehlee/Desktop/work/.venv/bin/python polyscope_root_viewer.py \
+  output/general-mesh-root/band3/bunny-r4096.nvdb --label 'band 3' \
+  --compare output/general-mesh-root/bunny-r4096.nvdb --compare-label 'band 2'
+```
+
+왼쪽 band 3은 root 1개, 오른쪽 band 2는 내부 1개와 잘못된 외부 14개를 포함한
+총 15개가 그대로 나타난다. 데이터는 보정하거나 잘못된 root를 숨기지 않는다.
+초기 추출 때 CPU RAM에 원본 grid를 읽지만, Polyscope GPU에는 root/참조 mesh와
+선택한 coarse fill만 등록한다. 이후에는 파일 크기·수정 시각으로 검증한 작은
+metadata cache를 재사용한다.
+
+옵션·정확한 half-voxel 정렬·clipping·4K 저장은
+[POLYSCOPE_ROOT_VIEWER.md](POLYSCOPE_ROOT_VIEWER.md)를 참고한다.
+
+### Polyscope에서 전 level과 active 부호 함께 보기
+
+```bash
+/home/jaehlee/Desktop/work/.venv/bin/python polyscope_root_viewer.py \
+  output/general-mesh-root/band3/bunny-r4096.nvdb --all-levels
+```
+
+leaf 1³ / lower 8³ / upper 128³ / root 4096³의 **실제 inactive fill**과 active
+signed voxel을 별도 구조로 등록한다. 음수는 모두 같은 주황색, 양수 active는
+파란색이다. 기본은 root 중심 Z=2048을 통과하는 한 voxel 두께 영역이다.
+샘플링하지 않고, 선택 영역에 걸치는 cell을 **원래 크기 그대로** 유지한다.
+root가 slab에 걸친다고 납작한 작은 cell로 바꾸지 않는다. clipping은 별도다.
+
+실제 high-res bunny에서 leaf 187,319 / lower 48,107 / upper 3,127 / root 1 /
+active 240,224개를 표시했고, `output/polyscope/bunny-all-levels-4k.png`도 저장했다.
+각 level을 UI에서 켜고 끌 수 있고, ROI와 counts도 UI에 표시된다.
+
+`--roi minX minY minZ maxX maxY maxZ`로 다른 영역을 고르거나, 작은 grid에서는
+`--whole-grid`로 전체를 등록할 수 있다. 고정된 cell 개수 상한을 두지는 않지만,
+이 high-res bunny 전체의 binary cell 기록만 약 53 GiB라서 전체 등록은 실행하지
+않았다. ROI를 쓰면 계층별 크기를 유지하며 메모리 비용을 줄일 수 있다.
