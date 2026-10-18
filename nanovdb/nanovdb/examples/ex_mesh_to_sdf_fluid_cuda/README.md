@@ -161,6 +161,52 @@ GPU/driver/headless 환경까지 확인한 뒤 전체 영상을 생성한다. `d
 
 입력 파일은 사용자가 별도로 제공한다. 기존 장면은 `Arms Hip Hop Dance.fbx` 를 사용했다.
 
+### Mixamo에서 입력 FBX 다운로드
+
+1. [Mixamo](https://www.mixamo.com/)에 Adobe ID로 로그인한다. 계정/서비스 조건은
+   [Adobe Mixamo FAQ](https://helpx.adobe.com/creative-cloud/faq/mixamo-faq.html)를 참조한다.
+2. 캐릭터를 선택하고 Animations에서 **Arms Hip Hop Dance**를 검색해 적용한다.
+   기존 입력의 mesh 이름은 `Beta_Joints`, `Beta_Surface`였다. 원래 다운로드 당시의
+   캐릭터 UI 이름과 motion slider 값은 기록하지 않았으므로 같은 animation 이름만으로
+   기존 영상과 동일한 geometry/motion을 보장할 수 없다. 아래 검사값과 preview를 비교한다.
+3. 전체 animation 구간을 유지하고 Download에서 **FBX Binary**, **With Skin**,
+   **30 fps**, **Keyframe Reduction: None**으로 받는다. 이는 재현용 권장 설정이며
+   원래 다운로드 대화상자의 모든 선택값을 복원한 기록은 아니다. Speed/Trim 등 motion
+   조정값도 변경했다면 별도로 기록한다. With Skin 없이 받으면 mesh가 없어 exporter가 실패한다.
+4. 파일을 `~/Downloads/Arms Hip Hop Dance.fbx`에 저장한다. 아래 `FBX` 환경변수로
+   다른 경로도 사용할 수 있다. 로그인/캐릭터 선택이 필요한 서비스이므로 직접 FBX URL이나
+   자동 다운로드 스크립트는 제공하지 않는다.
+5. 아래 `--inspect-only` 명령을 실행해 `inspection.json`을 확인하고, 전체 export 후
+   `metadata.json`의 topology 검증 결과와 Blender에서 `source.blend`의 초기·중간·마지막
+   pose를 확인한다. Animation 길이는
+   simulation duration + animation offset을 충분히 덮어야 한다.
+
+기존 입력의 확인용 fingerprint는 다음과 같다. 새 다운로드의 hash는 FBX exporter의
+metadata 등에 따라 달라질 수 있다. Hash가 다르면 byte-identical 입력으로 간주하지 말고
+geometry, animation timing과 preview를 비교한다.
+
+| Property | Original input |
+|---|---|
+| File name | `Arms Hip Hop Dance.fbx` |
+| File size | 3,455,696 bytes (3.296 MiB) |
+| SHA-256 | `5b233159115778201f1de250a7d9df69d917b9cbd434d4a996610859a3502823` |
+| Imported FPS / frame range | 30 fps / 1–660 |
+| Evaluated vertices / triangles | 24,746 / 49,112 |
+| Mesh objects | `Beta_Joints`, `Beta_Surface` |
+| Import environment | Blender 5.2.2 LTS; evaluated world-space mesh |
+
+```bash
+sha256sum "$HOME/Downloads/Arms Hip Hop Dance.fbx"
+```
+
+FBX 원본은 저장소에 포함하지 않는다. Adobe Community의
+[Mixamo 배포 안내](https://community.adobe.com/questions-696/mixamo-faq-licensing-royalties-ownership-eula-and-tos-589400?lang=en)는
+원본 character/animation 파일의 공개 재배포를 제한한다고 설명한다. 각 사용자가 직접
+다운로드하고 적용되는 이용 조건을 확인한다. Exporter가 만드는 `source.fbx`, `source.blend`,
+OBJ sequence도 로컬 `output/`에 유지하며 Git에 추가하지 않는다.
+
+### 입력 검사와 simulation용 mesh sequence 생성
+
 ```bash
 export FBX="$HOME/Downloads/Arms Hip Hop Dance.fbx"
 test -f "$FBX"
